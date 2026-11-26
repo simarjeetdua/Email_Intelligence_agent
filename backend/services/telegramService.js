@@ -131,3 +131,10 @@ ${placement.summary || "No summary available"}
   `.trim();
 }
 
+
+export async function sendPlacementNotification(placement) {
+  const message = formatPlacementMessage(placement);
+
+  return await sendTelegramMessage(message);
+}
+

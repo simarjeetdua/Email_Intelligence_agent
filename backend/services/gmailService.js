@@ -2,6 +2,12 @@
 import { executeComposioTool } from "../mcp/toolRunner.js";
 
 // =====================================
+// CONFIGURATION
+// =====================================
+
+const MAX_EMAILS_PER_PAGE = 10;
+
+// =====================================
 // PARSE COMPOSIO RESPONSE
 // =====================================
 
@@ -34,12 +40,15 @@ function parseResult(result) {
 // =====================================
 
 function extractMessages(data) {
-  if (Array.isArray(data)) return data;
+  if (Array.isArray(data)) {
+    return data;
+  }
 
   const messages =
     data?.messages ??
     data?.data?.messages ??
     data?.results ??
+    data?.data?.results ??
     [];
 
   return Array.isArray(messages) ? messages : [];
@@ -61,12 +70,17 @@ function extractNextPageToken(data) {
 
 export async function fetchRecentEmails(
   query = "",
-  maxResults = 1,
+  maxResults = 10,
   pageToken
 ) {
+  const safeMaxResults = Math.min(
+    Math.max(Number(maxResults) || 1, 1),
+    MAX_EMAILS_PER_PAGE
+  );
+
   const args = {
     query,
-    max_results: Math.min(Math.max(maxResults, 1), 1),
+    max_results: safeMaxResults,
     include_payload: true,
     verbose: true,
     ids_only: false,
@@ -77,6 +91,7 @@ export async function fetchRecentEmails(
   }
 
   console.log("[Gmail] Fetching detailed emails with payload...");
+  console.log("[Gmail] Requested page size:", safeMaxResults);
 
   const result = await executeComposioTool(
     "GMAIL_FETCH_EMAILS",
@@ -86,15 +101,15 @@ export async function fetchRecentEmails(
   const data = parseResult(result);
   const messages = extractMessages(data);
 
-  console.log(`[Gmail] Detailed messages received: ${messages.length}`);
+  const nextPageToken = extractNextPageToken(data);
 
-  if (!Array.isArray(messages)) {
-    throw new Error("Unexpected Gmail messages response");
-  }
+  console.log(
+    `[Gmail] Detailed messages received: ${messages.length}`
+  );
 
   return {
     messages,
-    nextPageToken: extractNextPageToken(data),
+    nextPageToken,
   };
 }
 
@@ -102,13 +117,21 @@ export async function fetchRecentEmails(
 // FETCH ALL PAGES
 // =====================================
 
-export async function fetchAllEmails(query = "", maxResults = 1) {
+export async function fetchAllEmails(
+  query = "",
+  maxResults = 10
+) {
   const allMessages = [];
   const seenTokens = new Set();
 
-  let pageToken;
+  let pageToken = null;
+  let pageNumber = 0;
 
   do {
+    pageNumber++;
+
+    console.log(`\n[Gmail] Fetching page ${pageNumber}...`);
+
     const page = await fetchRecentEmails(
       query,
       maxResults,
@@ -118,21 +141,29 @@ export async function fetchAllEmails(query = "", maxResults = 1) {
     allMessages.push(...page.messages);
 
     console.log(
-      `[Gmail] Retrieved ${page.messages.length} emails. Total: ${allMessages.length}`
+      `[Gmail] Page ${pageNumber}: ${page.messages.length} emails`
+    );
+
+    console.log(
+      `[Gmail] Total retrieved: ${allMessages.length}`
     );
 
     pageToken = page.nextPageToken;
 
     if (pageToken) {
       if (seenTokens.has(pageToken)) {
-        throw new Error("Repeated Gmail pagination token");
+        throw new Error(
+          "Repeated Gmail pagination token detected"
+        );
       }
 
       seenTokens.add(pageToken);
     }
   } while (pageToken);
 
-  console.log(`[Gmail] Total emails retrieved: ${allMessages.length}`);
+  console.log(
+    `\n[Gmail] Total emails retrieved: ${allMessages.length}`
+  );
 
   return allMessages;
 }
@@ -154,7 +185,8 @@ function decodeBase64Url(value) {
     }
 
     return Buffer.from(normalized, "base64").toString("utf8");
-  } catch {
+  } catch (error) {
+    console.error("[Gmail] Body decoding failed:", error.message);
     return "";
   }
 }
@@ -187,7 +219,10 @@ function htmlToText(html) {
 // EXTRACT EMAIL BODY
 // =====================================
 
-function collectMimeBodies(payload, bodies = { plain: [], html: [] }) {
+function collectMimeBodies(
+  payload,
+  bodies = { plain: [], html: [] }
+) {
   if (!payload) return bodies;
 
   const mimeType = payload.mimeType?.toLowerCase();
@@ -220,19 +255,19 @@ function extractBody(payload) {
   // Prefer plain text.
   const plainText = bodies.plain
     .filter(Boolean)
-    .join("\n");
+    .join("\n")
+    .trim();
 
-  if (plainText.trim()) {
-    return plainText.trim();
+  if (plainText) {
+    return plainText;
   }
 
-  // Fall back to HTML if plain text is unavailable.
-  const htmlText = bodies.html
+  // Fall back to HTML.
+  return bodies.html
     .filter(Boolean)
     .map(htmlToText)
-    .join("\n");
-
-  return htmlText.trim();
+    .join("\n")
+    .trim();
 }
 
 // =====================================

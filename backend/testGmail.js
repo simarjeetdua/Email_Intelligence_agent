@@ -2,41 +2,36 @@
 import "dotenv/config";
 
 import { initializeComposio } from "./mcp/composioClient.js";
+import { executeComposioTool } from "./mcp/toolRunner.js";
 
-import {
-  fetchRecentEmails,
-  normalizeEmail,
-} from "./services/gmailService.js";
+async function run() {
+  await initializeComposio();
 
-async function testGmailBody() {
-  try {
-    await initializeComposio();
+  const queries = [
+    "from:svvv.edu.in",
+    "svvv placement",
+    '"Corporate Relations and Placement"',
+    "placement internship recruitment",
+    "from:directorcrp@svvv.edu.in OR from:santoshpatidar@svvv.edu.in",
+  ];
 
-    const query =
-      "from:directorcrp@svvv.edu.in subject:TCS";
+  for (const query of queries) {
+    console.log("\n==================================");
+    console.log("QUERY:", query);
 
-    const result = await fetchRecentEmails(query, 1);
+    const result = await executeComposioTool(
+      "GMAIL_FETCH_EMAILS",
+      {
+        query,
+        max_results: 10,
+        include_payload: false,
+        verbose: false,
+        ids_only: false,
+      }
+    );
 
-    if (!result.messages.length) {
-      console.log("No matching TCS email found.");
-      return;
-    }
-
-    const email = normalizeEmail(result.messages[0]);
-
-    console.log("\n========== EMAIL BODY TEST ==========");
-
-    console.log("Sender:", email.sender);
-    console.log("Subject:", email.subject);
-    console.log("Received:", email.receivedAt);
-
-    console.log("\nBody characters:", email.body.length);
-    console.log("\nActual email body:\n");
-    console.log(email.body);
-
-  } catch (error) {
-    console.error("Gmail body test failed:", error);
+    console.log(result);
   }
 }
 
-testGmailBody();
+run().catch(console.error);

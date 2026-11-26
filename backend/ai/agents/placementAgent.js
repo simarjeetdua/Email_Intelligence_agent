@@ -9,6 +9,7 @@ const placementExtractor =
 const ALLOWED_TPO_SENDERS = [
   "directorcrp@svvv.edu.in",
   "santoshpatidar@svvv.edu.in",
+  "crp@svvv.edu.in",
 ];
 
 function extractSenderAddress(sender = "") {
