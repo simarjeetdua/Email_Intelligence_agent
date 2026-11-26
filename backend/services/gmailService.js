@@ -26,11 +26,7 @@ function parseResult(result) {
     }
   }
 
-  if (result?.data) {
-    return result.data;
-  }
-
-  return result;
+  return result?.data ?? result;
 }
 
 // =====================================
@@ -40,12 +36,13 @@ function parseResult(result) {
 function extractMessages(data) {
   if (Array.isArray(data)) return data;
 
-  return (
+  const messages =
     data?.messages ??
     data?.data?.messages ??
     data?.results ??
-    []
-  );
+    [];
+
+  return Array.isArray(messages) ? messages : [];
 }
 
 function extractNextPageToken(data) {
@@ -64,14 +61,14 @@ function extractNextPageToken(data) {
 
 export async function fetchRecentEmails(
   query = "",
-  maxResults = 5,
+  maxResults = 1,
   pageToken
 ) {
   const args = {
     query,
-    max_results: Math.min(Math.max(maxResults, 1), 5),
-    include_payload: false,
-    verbose: false,
+    max_results: Math.min(Math.max(maxResults, 1), 1),
+    include_payload: true,
+    verbose: true,
     ids_only: false,
   };
 
@@ -79,7 +76,7 @@ export async function fetchRecentEmails(
     args.page_token = pageToken;
   }
 
-  console.log("[Gmail] Fetching email metadata...");
+  console.log("[Gmail] Fetching detailed emails with payload...");
 
   const result = await executeComposioTool(
     "GMAIL_FETCH_EMAILS",
@@ -88,6 +85,8 @@ export async function fetchRecentEmails(
 
   const data = parseResult(result);
   const messages = extractMessages(data);
+
+  console.log(`[Gmail] Detailed messages received: ${messages.length}`);
 
   if (!Array.isArray(messages)) {
     throw new Error("Unexpected Gmail messages response");
@@ -103,7 +102,7 @@ export async function fetchRecentEmails(
 // FETCH ALL PAGES
 // =====================================
 
-export async function fetchAllEmails(query = "", maxResults = 5) {
+export async function fetchAllEmails(query = "", maxResults = 1) {
   const allMessages = [];
   const seenTokens = new Set();
 
@@ -115,10 +114,6 @@ export async function fetchAllEmails(query = "", maxResults = 5) {
       maxResults,
       pageToken
     );
-
-    if (!page || !Array.isArray(page.messages)) {
-      throw new Error("Invalid Gmail pagination response");
-    }
 
     allMessages.push(...page.messages);
 
@@ -137,9 +132,7 @@ export async function fetchAllEmails(query = "", maxResults = 5) {
     }
   } while (pageToken);
 
-  console.log(
-    `[Gmail] Total emails retrieved: ${allMessages.length}`
-  );
+  console.log(`[Gmail] Total emails retrieved: ${allMessages.length}`);
 
   return allMessages;
 }
@@ -167,34 +160,79 @@ function decodeBase64Url(value) {
 }
 
 // =====================================
+// REMOVE HTML TAGS
+// =====================================
+
+function htmlToText(html) {
+  if (!html) return "";
+
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// =====================================
 // EXTRACT EMAIL BODY
 // =====================================
 
-function extractBody(payload) {
-  if (!payload) return "";
+function collectMimeBodies(payload, bodies = { plain: [], html: [] }) {
+  if (!payload) return bodies;
 
-  if (
-    payload.mimeType === "text/plain" &&
-    payload.body?.data
-  ) {
-    return decodeBase64Url(payload.body.data);
+  const mimeType = payload.mimeType?.toLowerCase();
+  const encodedBody = payload.body?.data;
+
+  if (encodedBody) {
+    const decoded = decodeBase64Url(encodedBody);
+
+    if (mimeType === "text/plain") {
+      bodies.plain.push(decoded);
+    } else if (mimeType === "text/html") {
+      bodies.html.push(decoded);
+    }
   }
 
   if (Array.isArray(payload.parts)) {
     for (const part of payload.parts) {
-      const body = extractBody(part);
-
-      if (body.trim()) {
-        return body;
-      }
+      collectMimeBodies(part, bodies);
     }
   }
 
-  if (payload.body?.data) {
-    return decodeBase64Url(payload.body.data);
+  return bodies;
+}
+
+function extractBody(payload) {
+  if (!payload) return "";
+
+  const bodies = collectMimeBodies(payload);
+
+  // Prefer plain text.
+  const plainText = bodies.plain
+    .filter(Boolean)
+    .join("\n");
+
+  if (plainText.trim()) {
+    return plainText.trim();
   }
 
-  return "";
+  // Fall back to HTML if plain text is unavailable.
+  const htmlText = bodies.html
+    .filter(Boolean)
+    .map(htmlToText)
+    .join("\n");
+
+  return htmlText.trim();
 }
 
 // =====================================
@@ -243,16 +281,18 @@ export function normalizeEmail(message) {
     getHeader(headers, "Date") ??
     new Date();
 
+  const payloadBody = extractBody(payload);
+
   const extractedBody =
     message.messageText ||
     message.message_text ||
     message.body ||
     message.text ||
-    extractBody(payload) ||
+    payloadBody ||
     message.snippet ||
     "";
 
-  return {
+  const normalizedEmail = {
     messageId,
     threadId:
       message.threadId ??
@@ -264,4 +304,13 @@ export function normalizeEmail(message) {
     snippet: message.snippet || "",
     body: extractedBody,
   };
+
+  console.log("[Gmail] Email normalized:", {
+    subject: normalizedEmail.subject,
+    sender: normalizedEmail.sender,
+    bodyCharacters: normalizedEmail.body.length,
+    hasFullBody: normalizedEmail.body.length > 0,
+  });
+
+  return normalizedEmail;
 }

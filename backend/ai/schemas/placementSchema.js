@@ -11,8 +11,6 @@ export const placementSchema = z.object({
     "other",
   ]),
 
-  confidence: z.number().min(0).max(1),
-
   company: z.string().nullable(),
   role: z.string().nullable(),
   package: z.string().nullable(),
@@ -20,16 +18,13 @@ export const placementSchema = z.object({
 
   minimumCGPA: z.string().nullable(),
   allowedBacklogs: z.string().nullable(),
-
   branches: z.array(z.string()),
 
-  additionalRequirements: z.string().nullable(),
+  additionalRequirements: z.array(z.string()),
 
   deadline: z.string().nullable(),
-
   registrationUrl: z.string().nullable(),
 
   summary: z.string(),
-
-  reason: z.string(),
+  confidence: z.number().min(0).max(1),
 });

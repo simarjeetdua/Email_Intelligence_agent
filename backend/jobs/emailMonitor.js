@@ -10,9 +10,7 @@ import {
   normalizeEmail,
 } from "../services/gmailService.js";
 
-import {
-  analyzePlacement,
-} from "../ai/agents/placementAgent.js";
+import { analyzePlacement } from "../ai/agents/placementAgent.js";
 
 import {
   sendPlacementNotification,
@@ -25,7 +23,18 @@ import {
 const STATE_KEY = "gmail-email-monitor";
 const HISTORY_STATE_KEY = "gmail-history-backfill";
 
-const HISTORICAL_QUERY = "-in:sent -in:drafts";
+// Only these two SVVV placement contacts.
+const ALLOWED_TPO_SENDERS = [
+  "directorcrp@svvv.edu.in",
+  "santoshpatidar@svvv.edu.in",
+];
+
+// Gmail OR search for both senders.
+const HISTORICAL_QUERY =
+  "{from:directorcrp@svvv.edu.in from:santoshpatidar@svvv.edu.in} -in:sent -in:drafts";
+
+// Keep small pages to avoid Composio payload limits.
+const EMAILS_PER_PAGE = 5;
 
 let isRunning = false;
 let scheduledTask = null;
@@ -33,6 +42,20 @@ let scheduledTask = null;
 // =====================================
 // HELPER FUNCTIONS
 // =====================================
+
+function extractEmailAddress(sender = "") {
+  const match = String(sender).match(
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
+  );
+
+  return match ? match[0].toLowerCase() : "";
+}
+
+function isAllowedSender(sender) {
+  const address = extractEmailAddress(sender);
+
+  return ALLOWED_TPO_SENDERS.includes(address);
+}
 
 function validUrl(value) {
   if (!value) return null;
@@ -81,6 +104,15 @@ async function processEmail(rawMessage) {
     if (!email?.messageId) {
       console.log("[Monitor] Missing message ID");
       return false;
+    }
+
+    // Additional sender validation.
+    if (!isAllowedSender(email.sender)) {
+      console.log(
+        "[Monitor] Sender not in approved SVVV TPO contacts. Skipping."
+      );
+
+      return true;
     }
 
     console.log("\n--------------------------------");
@@ -312,23 +344,24 @@ async function runHistoricalScan() {
     key: HISTORY_STATE_KEY,
   });
 
-  // Historical scan already completed.
   if (completed) {
+    console.log("[History] Historical scan already completed.");
     return true;
   }
 
   console.log("\n========== HISTORICAL EMAIL SCAN ==========");
 
-  console.log("[History] Fetching previously received emails...");
+  console.log("[History] Searching SVVV TPO emails...");
 
-  // Fetch every Gmail page.
+  console.log("[History] Gmail query:", HISTORICAL_QUERY);
+
   const messages = await fetchAllEmails(
     HISTORICAL_QUERY,
-    500
+    EMAILS_PER_PAGE
   );
 
   console.log(
-    `[History] Total historical emails: ${messages.length}`
+    `[History] Total SVVV emails retrieved: ${messages.length}`
   );
 
   let allSuccessful = true;
@@ -341,8 +374,6 @@ async function runHistoricalScan() {
     }
   }
 
-  // Mark history scan complete only when every email
-  // has been processed successfully.
   if (!allSuccessful) {
     console.log(
       "[History] Some emails failed. Historical scan will retry."
@@ -357,7 +388,7 @@ async function runHistoricalScan() {
   });
 
   console.log(
-    "[History] Historical scan completed successfully!"
+    "[History] Historical SVVV scan completed successfully!"
   );
 
   return true;
@@ -368,13 +399,11 @@ async function runHistoricalScan() {
 // =====================================
 
 async function runNewEmailScan(state) {
-  console.log("\n========== NEW EMAIL SCAN ==========");
+  console.log("\n========== NEW SVVV EMAIL SCAN ==========");
 
-  // Capture checkpoint before fetching.
   const scanStartedAt = new Date();
 
-  // Gmail after: uses calendar dates, not Unix timestamps.
-  // Overlap by one day to avoid missing messages.
+  // Overlap one day to avoid missing emails.
   const overlapDate = new Date(
     state.lastCheckedAt.getTime() - 24 * 60 * 60 * 1000
   );
@@ -384,14 +413,13 @@ async function runNewEmailScan(state) {
 
   console.log("[Monitor] Gmail query:", query);
 
-  // Fetch all pages, not just the first 50/500 messages.
   const messages = await fetchAllEmails(
     query,
-    500
+    EMAILS_PER_PAGE
   );
 
   console.log(
-    `[Monitor] Retrieved ${messages.length} emails`
+    `[Monitor] Retrieved ${messages.length} SVVV emails`
   );
 
   let allSuccessful = true;
@@ -412,13 +440,12 @@ async function runNewEmailScan(state) {
     return;
   }
 
-  // Advance checkpoint only after successful processing.
   state.lastCheckedAt = scanStartedAt;
 
   await state.save();
 
   console.log(
-    "[Monitor] New email scan completed successfully."
+    "[Monitor] New SVVV email scan completed successfully."
   );
 }
 
@@ -437,7 +464,6 @@ export async function runEmailMonitorOnce() {
   try {
     console.log("\n========== EMAIL MONITOR ==========");
 
-    // Create incremental checkpoint before historical scan.
     let state = await MonitorState.findOne({
       key: STATE_KEY,
     });
@@ -453,7 +479,7 @@ export async function runEmailMonitorOnce() {
       );
     }
 
-    // First complete the historical scan.
+    // First complete historical scan.
     const historyCompleted = await runHistoricalScan();
 
     if (!historyCompleted) {
@@ -464,7 +490,7 @@ export async function runEmailMonitorOnce() {
       return;
     }
 
-    // Then fetch newly received emails.
+    // Then check new SVVV emails.
     await runNewEmailScan(state);
 
   } catch (error) {
@@ -502,7 +528,7 @@ export function startEmailMonitor() {
   }
 
   console.log(
-    `[Monitor] Starting Gmail monitor every ${interval} minutes`
+    `[Monitor] Starting SVVV Gmail monitor every ${interval} minutes`
   );
 
   // Run immediately.
