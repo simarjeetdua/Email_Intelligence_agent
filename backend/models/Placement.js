@@ -28,19 +28,16 @@ const placementSchema = new mongoose.Schema(
       additionalRequirements: [String],
     },
 
-    // Primary student registration deadline
     deadline: Date,
-
-    // Preserve the original deadline text
     deadlineText: String,
 
-    // Company application portal
-    applicationUrl: String,
+    collegeSubmissionDeadline: Date,
+    collegeSubmissionDeadlineText: String,
 
-    // University confirmation form
+    applicationUrl: String,
     universityConfirmationUrl: String,
 
-    // Backward compatibility
+    // Keep for compatibility with existing records.
     registrationUrl: String,
 
     summary: String,

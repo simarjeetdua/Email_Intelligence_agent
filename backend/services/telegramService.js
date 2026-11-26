@@ -69,23 +69,35 @@ export async function sendTelegramMessage(message) {
   return data.result;
 }
 
-export function formatPlacementMessage(placement) {
-  const status = getOpportunityStatus(placement);
 
+export function formatPlacementMessage(placement) {
   const eligibility = placement.eligibility || {};
 
-  const applicationUrl =
-    placement.applicationUrl ||
-    placement.registrationUrl ||
-    "Not provided";
+  const status =
+    placement.status === "expired"
+      ? "⚠️ EXPIRED — HISTORICAL OPPORTUNITY"
+      : placement.status === "active"
+        ? "🟢 ACTIVE / UPCOMING"
+        : "ℹ️ DEADLINE UNKNOWN";
 
-  const universityUrl =
-    placement.universityConfirmationUrl;
+  const formatDate = (date) => {
+    if (!date) return "Not specified";
+
+    return new Date(date).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+    });
+  };
+
+  const requirements = Array.isArray(
+    eligibility.additionalRequirements
+  )
+    ? eligibility.additionalRequirements.join("\n• ")
+    : eligibility.additionalRequirements || "Not specified";
 
   return `
 🎯 SVVV PLACEMENT ALERT
 
-${status === "EXPIRED" ? "⚠️ HISTORICAL / EXPIRED OPPORTUNITY" : "📢 PLACEMENT OPPORTUNITY"}
+${status}
 
 🏢 Company: ${placement.company || "Not specified"}
 💼 Role: ${placement.role || "Not specified"}
@@ -100,24 +112,22 @@ Backlogs: ${eligibility.allowedBacklogs || "Not specified"}
 Branches: ${eligibility.branches?.join(", ") || "Not specified"}
 
 Additional requirements:
-${formatRequirements(eligibility.additionalRequirements)}
+• ${requirements}
 
-⏰ Deadline: ${formatDate(placement.deadline)}
-${placement.deadlineText ? `Original deadline: ${placement.deadlineText}` : ""}
+⏰ Student registration deadline:
+${placement.deadlineText || formatDate(placement.deadline)}
+
+⏰ College submission deadline:
+${placement.collegeSubmissionDeadlineText || formatDate(placement.collegeSubmissionDeadline)}
 
 🔗 Company application:
-${applicationUrl}
+${placement.applicationUrl || placement.registrationUrl || "Not provided"}
 
-${universityUrl ? `🔗 University registration:\n${universityUrl}` : ""}
+🔗 University confirmation:
+${placement.universityConfirmationUrl || "Not provided"}
 
 📝 SUMMARY
 ${placement.summary || "No summary available"}
-
-Confidence: ${placement.confidence ?? "Not specified"}
   `.trim();
 }
 
-export async function sendPlacementNotification(placement) {
-  const message = formatPlacementMessage(placement);
-  return await sendTelegramMessage(message);
-}

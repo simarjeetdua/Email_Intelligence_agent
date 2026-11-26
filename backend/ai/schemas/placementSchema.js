@@ -22,7 +22,20 @@ export const placementSchema = z.object({
 
   additionalRequirements: z.array(z.string()),
 
+  // Primary student application deadline.
+  // Use ISO 8601 format, e.g. 2026-05-12T22:00:00+05:30.
   deadline: z.string().nullable(),
+  deadlineText: z.string().nullable(),
+
+  // Separate deadline for college/TPO submission, if present.
+  collegeSubmissionDeadline: z.string().nullable(),
+  collegeSubmissionDeadlineText: z.string().nullable(),
+
+  // Separate application links.
+  applicationUrl: z.string().nullable(),
+  universityConfirmationUrl: z.string().nullable(),
+
+  // Backward compatibility with older analysis.
   registrationUrl: z.string().nullable(),
 
   summary: z.string(),
